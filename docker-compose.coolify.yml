@@ -1,0 +1,157 @@
+# Conzent OCI on Coolify (consent.aiwebsitedetector.com).
+# Differences to docker-compose.yml:
+#  - no host port: Coolify's proxy routes the domain to nginx:80
+#  - secrets come from Coolify's generated SERVICE_PASSWORD_* variables (nothing secret in this file)
+#  - no bundled cookie scanner (headless Chromium, heavy); consent collection does not need it
+#  - a one-shot "init" service runs the database migrations and creates the first admin (both idempotent),
+#    which the upstream install.sh would otherwise do by hand
+x-app-env: &app-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: ${APP_URL:-https://consent.aiwebsitedetector.com}
+  APP_SECRET: ${SERVICE_PASSWORD_64_APPSECRET}
+  DATABASE_URL: mysql://oci:${SERVICE_PASSWORD_DB}@mariadb:3306/oci?charset=utf8mb4
+  REDIS_URL: redis://redis:6379
+  MAIL_HOST: ${MAIL_HOST:-}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+  MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Consent}
+  SCANNER_URL: ""
+  MONETIZATION_MODEL: oci
+
+x-app-build: &app-build
+  context: .
+  dockerfile: docker/php/Dockerfile
+  target: prod
+
+x-app-volumes: &app-volumes
+  - app-var:/var/www/html/var
+  - app-sites-data:/var/www/html/public/sites_data
+  - app-backups:/var/www/html/backups
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    environment:
+      - SERVICE_FQDN_NGINX_80
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - app-public:/var/www/html/public:ro
+      - app-sites-data:/var/www/html/public/sites_data:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  app:
+    build: *app-build
+    environment: *app-env
+    volumes:
+      - app-public:/var/www/html/public
+      - app-sites-data:/var/www/html/public/sites_data
+      - app-backups:/var/www/html/backups
+      - app-var:/var/www/html/var
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm-healthcheck || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  init:
+    build: *app-build
+    environment:
+      <<: *app-env
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
+    command: ["sh", "-c", "php bin/oci migrations:migrate --no-interaction && php bin/oci setup --email=\"$$ADMIN_EMAIL\" --password=\"$$ADMIN_PASSWORD\""]
+    volumes: *app-volumes
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
+    exclude_from_hc: true
+
+  worker:
+    build: *app-build
+    command: ["php", "bin/oci", "queue:work"]
+    environment: *app-env
+    volumes: *app-volumes
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    exclude_from_hc: true
+
+  scheduler:
+    build: *app-build
+    command: ["php", "bin/oci", "schedule:run"]
+    environment: *app-env
+    volumes: *app-volumes
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    exclude_from_hc: true
+
+  beacon-worker:
+    build: *app-build
+    command: ["php", "bin/oci", "ingest:flush"]
+    environment: *app-env
+    volumes: *app-volumes
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    exclude_from_hc: true
+
+  mariadb:
+    image: mariadb:11
+    volumes:
+      - oci-db-data:/var/lib/mysql
+    environment:
+      MARIADB_ROOT_PASSWORD: ${SERVICE_PASSWORD_DBROOT}
+      MARIADB_DATABASE: oci
+      MARIADB_USER: oci
+      MARIADB_PASSWORD: ${SERVICE_PASSWORD_DB}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - oci-redis-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  app-public:
+  app-sites-data:
+  app-backups:
+  app-var:
+  oci-db-data:
+  oci-redis-data:
