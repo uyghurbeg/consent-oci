@@ -18,7 +18,10 @@ x-app-env: &app-env
   MAIL_PASSWORD: ${MAIL_PASSWORD:-}
   MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
   MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Consent}
-  SCANNER_URL: ""
+  SCANNER_URL: http://scanner:8300
+  SCANNER_API_KEY: ${SERVICE_PASSWORD_SCANNERKEY}
+  # Scanner posts its results straight to the nginx container instead of looping through the public domain.
+  SCANNER_CALLBACK_URL: http://nginx
   # Consent log: HMAC-pseudonymise visitor IPs (without a key they are only truncated) and keep records 3 years.
   CONSENT_IP_KEY: ${SERVICE_PASSWORD_64_CONSENTIP}
   CONSENT_LOG_RETENTION_DAYS: "1095"
@@ -79,7 +82,7 @@ services:
     # `sh -c ...` command fell through to `php-fpm sh -c ...`, so migrations and the admin account never ran.
     # Override the entrypoint and run both steps as www-data, like the other php services.
     entrypoint: ["sh", "-c"]
-    command: ["rm -f /var/www/html/public/sites_data/init-debug.txt /var/www/html/public/sites_data/app-errors.txt; mkdir -p /var/www/html/var/cache/twig /var/www/html/var/log /var/www/html/var/sessions /var/www/html/public/sites_data /var/www/html/backups/uploaded && chown -R www-data:www-data /var/www/html/var /var/www/html/public /var/www/html/backups && su-exec www-data env HOME=/tmp php bin/oci migrations:migrate --no-interaction && su-exec www-data env HOME=/tmp php bin/oci setup --email=\"$$ADMIN_EMAIL\" --password=\"$$ADMIN_PASSWORD\""]
+    command: ["rm -f /var/www/html/public/sites_data/init-debug.txt /var/www/html/public/sites_data/app-errors.txt; mkdir -p /var/www/html/var/cache/twig /var/www/html/var/log /var/www/html/var/sessions /var/www/html/public/sites_data /var/www/html/backups/uploaded && chown -R www-data:www-data /var/www/html/var /var/www/html/public /var/www/html/backups && su-exec www-data env HOME=/tmp php bin/oci migrations:migrate --no-interaction && su-exec www-data env HOME=/tmp php bin/oci setup --email=\"$$ADMIN_EMAIL\" --password=\"$$ADMIN_PASSWORD\"; su-exec www-data env HOME=/tmp php bin/oci scanner:register"]
     volumes: *app-volumes
     depends_on:
       mariadb:
@@ -125,6 +128,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    exclude_from_hc: true
+
+  scanner:
+    # Headless Chromium that visits the sites and records cookies/localStorage (docs/scanning.md). Kept small on purpose:
+    # one scan at a time and a memory cap, so a heavy page can never starve the other apps on this server.
+    build:
+      context: ./docker/scanner
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8300"
+      SCANNER_API_KEY: ${SERVICE_PASSWORD_SCANNERKEY}
+      MAX_CONCURRENT: "1"
+      SCAN_TIMEOUT: "60000"
+    shm_size: "256m"
+    mem_limit: 1200m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8300/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped
     exclude_from_hc: true
 
