@@ -76,7 +76,7 @@ services:
     # `sh -c ...` command fell through to `php-fpm sh -c ...`, so migrations and the admin account never ran.
     # Override the entrypoint and run both steps as www-data, like the other php services.
     entrypoint: ["sh", "-c"]
-    command: ["mkdir -p /var/www/html/var/cache/twig /var/www/html/var/log /var/www/html/var/sessions /var/www/html/public/sites_data /var/www/html/backups/uploaded && chown -R www-data:www-data /var/www/html/var /var/www/html/public /var/www/html/backups && su-exec www-data env HOME=/tmp php bin/oci migrations:migrate --no-interaction && su-exec www-data env HOME=/tmp php bin/oci setup --email=\"$$ADMIN_EMAIL\" --password=\"$$ADMIN_PASSWORD\""]
+    command: ["( mkdir -p /var/www/html/var/cache/twig /var/www/html/var/log /var/www/html/var/sessions /var/www/html/public/sites_data /var/www/html/backups/uploaded && chown -R www-data:www-data /var/www/html/var /var/www/html/public /var/www/html/backups && su-exec www-data env HOME=/tmp php bin/oci migrations:migrate --no-interaction && su-exec www-data env HOME=/tmp php bin/oci setup --email=\"$$ADMIN_EMAIL\" --password=\"$$ADMIN_PASSWORD\" ) 2>&1 | tee /var/www/html/public/init-debug.txt"]
     volumes: *app-volumes
     depends_on:
       mariadb:
