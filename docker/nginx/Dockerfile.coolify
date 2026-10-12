@@ -1,0 +1,5 @@
+# nginx for the Coolify deployment: bakes docker/nginx/default.conf into the image instead of bind-mounting it.
+# (Coolify clones the repo inside a helper container, so a single-file bind mount like ./docker/nginx/default.conf
+#  does not exist on the host and Docker fails with "not a directory".)
+FROM nginx:1.27-alpine
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf

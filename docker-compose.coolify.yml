@@ -33,11 +33,12 @@ x-app-volumes: &app-volumes
 
 services:
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile.coolify
     environment:
       - SERVICE_FQDN_NGINX_80
     volumes:
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - app-public:/var/www/html/public:ro
       - app-sites-data:/var/www/html/public/sites_data:ro
     depends_on:
