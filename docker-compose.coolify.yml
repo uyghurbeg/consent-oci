@@ -19,6 +19,9 @@ x-app-env: &app-env
   MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
   MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Consent}
   SCANNER_URL: ""
+  # Consent log: HMAC-pseudonymise visitor IPs (without a key they are only truncated) and keep records 3 years.
+  CONSENT_IP_KEY: ${SERVICE_PASSWORD_64_CONSENTIP}
+  CONSENT_LOG_RETENTION_DAYS: "1095"
   MONETIZATION_MODEL: oci
 
 x-app-build: &app-build
