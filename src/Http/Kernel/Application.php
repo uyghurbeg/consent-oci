@@ -54,6 +54,10 @@ final class Application
         $app->logger = new Logger('oci');
         $logStream = $app->environment === 'test' ? 'php://memory' : 'php://stderr';
         $app->logger->pushHandler(new StreamHandler($logStream, Logger::DEBUG));
+        // TEMP DIAGNOSIS (remove): also keep warnings and errors in a file nginx can serve, because Coolify's API only exposes nginx logs.
+        if ($app->environment !== 'test') {
+            $app->logger->pushHandler(new StreamHandler('/var/www/html/public/sites_data/app-errors.txt', Logger::WARNING));
+        }
 
         // Modules (discover before container so module services can be registered)
         $modules = ModuleLoader::discover($basePath . '/src/Modules');
